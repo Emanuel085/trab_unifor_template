@@ -1,8 +1,8 @@
-site_name: Nome do projeto
+site_name: Indústria, Energia e Meio Ambiente (AI4I 2020)
 site_description: Descrição do projeto
 site_url: http://url_do_repositorio
-repo_url: http://url_do_repositorio
-repo_name: nome-do-repositorio
+repo_url: https://github.com/Emanuel085/trab_unifor_template
+repo_name: Emanuel085/trab_unifor_template
 
 nav:
   - Descrição do projeto: index.md
