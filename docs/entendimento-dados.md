@@ -1,109 +1,75 @@
 # Entendimento dos dados
 
-Esta página responde a três perguntas sobre o conjunto de dados: **o que existe**, **em que
-qualidade** e **o que isso impede ou permite** dentro dos objetivos do projeto.
-
-!!! tip "Como preencher esta página"
-    Preencha depois de [Fonte dos dados](fonte-dados.md) e antes de
-    [Preparação dos dados](preparacao.md): aqui você descreve o que encontrou, lá você
-    descreve o que fez a respeito.
-
-    Regras práticas:
-
-    - descreva o **grão** antes de qualquer outra coisa — quase todo erro de análise nasce
-      de somar coisas em grãos diferentes;
-    - agrupe as colunas por **dimensão de negócio**, não em ordem alfabética: é assim que
-      quem conhece o negócio procura;
-    - confronte os dados com os [critérios de sucesso](criterios-sucesso.md) e diga, para
-      cada requisito, se ele está **atendido, parcial ou inviável**;
-    - registre cada achado de qualidade com a **consequência para a análise**, não apenas a
-      constatação ("a coluna X tem 30% de nulo" → "por isso a distribuição de X é calculada
-      sobre a base com informação");
-    - o que não puder ser resolvido com dado disponível vira **limitação declarada**, não
-      um objetivo silenciosamente reduzido.
+Esta página responde a três perguntas sobre o conjunto de dados: **o que existe**, **em que qualidade** e **o que isso impede ou permite** dentro dos objetivos do projeto.
 
 ## Dados iniciais
 
-<span style="color:red">**Indique de onde vieram os dados analisados aqui e em qual
-notebook está a apuração desta página.**</span>
+Os dados analisados foram extraídos diretamente do arquivo `data/raw/ai4i2020.csv` Toda a apuração e geração de estatísticas descritivas, gráficos de distribuição e matrizes de correlação estão documentadas no notebook **`notebooks/1.0-eda.ipynb`**
 
 ## Descrição dos dados
 
 ### Grão
 
-Cada linha é um(a) **&lt;grão do registro&gt;** (`coluna_identificadora`).
+Cada linha é um **ciclo operacional individual de usinagem de máquina** (`UDI`).
 
-<span style="color:red">**Diga se a tabela é normalizada ou achatada e, se for achatada,
-quantas dimensões estão embutidas nela.**</span>
+A tabela encontra-se achatada (desnormalizada), embutindo características físicas do produto, medições contínuas de sensores de processo e registros históricos de falhas industriais no mesmo registro.
 
 ### Grupos de colunas
 
 | Dimensão | Exemplos de colunas |
 |:---|:---|
-| &lt;Dimensão de negócio&gt; | `coluna_a`, `coluna_b`, `coluna_c` |
-| &lt;Dimensão de negócio&gt; | `coluna_d`, `coluna_e` |
-| Métricas | `metrica_a`, `metrica_b` |
+| **Identificação do Registro** | `UDI`, `Product ID` |
+| **Qualidade do Produto** | `Type` (`L`, `M`, `H`) |
+| **Sensores Térmicos** | `Air temperature [K]`, `Process temperature [K]` |
+| **Sensores Mecânicos** | `Rotational speed [rpm]`, `Torque [Nm]` |
+| **Desgaste do Componente** | `Tool wear [min]` |
+| **Validação / Falhas (Isoladas)** | `Machine failure`, `TWF`, `HDF`, `PWF`, `OSF`, `RNF` |
 
-### Cobertura frente aos critérios de sucesso
+### Cobertura frente aos criteria de sucesso
 
 | Requisito | Situação |
 |:---|:---|
-| &lt;Requisito vindo dos critérios de sucesso&gt; | **atendida** — &lt;com que dado&gt; |
-| &lt;Requisito vindo dos critérios de sucesso&gt; | **parcial** — &lt;o que falta&gt; |
-| &lt;Requisito vindo dos critérios de sucesso&gt; | **inviável** — &lt;por quê&gt; |
+| Mapeamento de regimes sem rótulos | **atendida** — Variáveis de sensores (`Air temp`, `Process temp`, `Rotational speed`, `Torque`, `Tool wear`) estão completas e foram isoladas das colunas de falha. |
+| Delimitação em até 5 clusters ($k \le 5$) | **atendida** — Métricas de inércia e silhueta aplicadas sobre os dados numéricos padronizados confirmaram $k=3$ como partição ideal. |
+| Detecção de anomalias operacionais | **atendida** — Presença de desvios extremos identificados nas variáveis mecânicas permite isolamento via DBSCAN. |
+
+---
 
 ## Qualidade dos dados
 
 ### Valores sentinela
 
-Muitos sistemas de origem não gravam nulo: a ausência de informação vira uma categoria de
-texto ou um código negativo. Sem tratamento, essas sentinelas aparecem nas distribuições
-como se fossem valores reais.
+A análise via pandas/code apurou **0 valores nulos/ausentes** em todas as 14 colunas. Também não foram identificados códigos negativos ou textos genéricos usados como sentinelas de ausência.
 
 | Sentinela | Significado |
 |:---|:---|
-| `<valor sentinela>` | &lt;o que representa na origem&gt; |
-| `<valor sentinela>` | &lt;o que representa na origem&gt; |
+| *Nenhuma sentinela encontrada* | Todos os registros possuem valores numéricos ou categóricos válidos no domínio da variável. |
 
-<span style="color:red">**Diga onde essas regras estão implementadas e se há exceção
-deliberada — alguma coluna em que a sentinela é categoria legítima e deve ser preservada.**</span>
+As regras de validação foram aplicadas no notebook `1.0-eda.ipynb`. Como não há valores nulos ou sentinelas, nenhuma linha precisou ser descartada por inconsistência de preenchimento.
 
 ### Achados que mudam a análise
 
-Registre aqui o que foi descoberto na exploração e que **altera alguma decisão** adiante.
+1. **Redundância Térmica ($r = 0,88$):** As temperaturas do ar (`Air temperature`) e do processo (`Process temperature`) possuem forte correlação positiva. *O que muda:* A redução de dimensionalidade via PCA é fundamental para condensar a variância térmica em uma única dimensão principal sem duplicar peso no clustering.
+2. **Inversão de Potência Torque/Rotação ($r = -0,88$):** Forte correlação negativa refletindo a física de motores elétricos. *O que muda:* Confirma que agrupamentos baseados em distância euclidiana capturam regimes operacionais reais (ex.: alta rotação/baixo torque vs. baixa rotação/alto torque).
+3. **Assimetria e Outliers em Torque e Rotação:** A velocidade de rotação apresenta cauda longa à direita (outliers de alta rotação). *O que muda:* Exige obrigatoriamente a padronização via `StandardScaler` para impedir que a amplitude de rotação (1100–2800 rpm) domine indevidamente a variável de torque (3–76 Nm).
 
-??? note "O que costuma aparecer nesta seção"
-    - **coluna quase certa**: existem duas colunas parecidas e a informação útil está na
-      menos óbvia;
-    - **sujeira de formatação**: espaços de preenchimento, caixa inconsistente ou acentuação
-      que fragmentam a mesma categoria em várias;
-    - **preenchimento descontínuo**: a coluna deixa de ser alimentada em parte da série;
-    - **ausência estrutural, não aleatória**: o campo falta justamente em um subconjunto
-      (um canal, um período, um tipo de cliente) — descartar essas linhas enviesa o retrato;
-    - **valores extremos legítimos**: outliers que são reais e não podem ser removidos de
-      somas, mas distorcem médias.
-
-1. <span style="color:red">**Achado — e o que ele muda na análise.**</span>
-2. <span style="color:red">**Achado — e o que ele muda na análise.**</span>
-3. <span style="color:red">**Achado — e o que ele muda na análise.**</span>
+---
 
 ## Dimensões-chave
 
-Use esta seção para detalhar uma dimensão que exigiu tratamento próprio — porque não existia
-na origem, porque foi derivada, ou porque sustenta sozinha um critério de aceite.
+Uma dimensão derivada criada na fase de preparação foi a codificação ordinal da categoria de qualidade do produto (`Type`).
 
-<span style="color:red">**Descreva a dimensão: de onde ela vem, como é derivada e por que a
-derivação foi feita assim.**</span>
+A coluna original armazena texto indicando a variante do produto (`L`, `M`, `H`). Como essas variantes representam níveis hierárquicos de qualidade e tolerância de fabricação, aplicou-se a ordenação numérica.
 
 | Valor | Descrição | Regra de derivação |
 |:---|:---|:---|
-| `<valor>` | &lt;o que significa&gt; | &lt;condição que o produz&gt; |
-| `<valor>` | &lt;o que significa&gt; | &lt;condição que o produz&gt; |
+| `0` | Low (`L`) | Produto variante Low (responde por 60% da produção) |
+| `1` | Medium (`M`) | Produto variante Medium (responde por 30% da produção) |
+| `2` | High (`H`) | Produto variante High (responde por 10% da produção) |
+
+---
 
 ## Limitações
 
-O que os dados **não** permitem responder, com o impacto em cada objetivo afetado.
-
-<span style="color:red">**Declare cada limitação e qual objetivo ela afeta. Se depender de
-dado a ser fornecido por terceiro, registre também nas pendências dos
-[critérios de sucesso](criterios-sucesso.md).**</span>
+1. **Ausência de Sequência Temporal Contínua:** O dataset não fornece marcações de data/hora (*timestamps*) reais entre os ciclos de usinagem. *Impacto:* Impede a modelagem de séries temporais para prever o momento exato de uma quebra futura, restringindo o escopo ao agrupamento de regimes operacionais e detecção de anomalias pontuais.
+2. **Dados Sintéticos Normalizados:** Embora realista, a base provém de um gerador sintético de processos (UCI AI4I 2020). *Impacto:* Os clusters identificados representam os regimes do modelo de simulação e devem ser revalidados com sensores de telemetria física real antes de implantar automação direta na planta.

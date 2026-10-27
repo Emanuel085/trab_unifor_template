@@ -3,93 +3,84 @@
 Esta página descreve **de onde vêm os dados** do projeto: a origem, como ela está
 organizada, qual é o grão de cada registro e como a carga é reproduzida.
 
-!!! tip "Como preencher esta página"
-    Substitua os textos em destaque pelos do seu projeto. Preencha antes de começar a
-    análise — quem chega depois no repositório lê esta página primeiro.
-
-    Regras práticas:
-
-    - descreva a origem de forma que **outra pessoa consiga acessá-la** (sistema, caminho,
-      credencial necessária), sem expor segredos ou caminhos com dados pessoais;
-    - registre o **grão** em uma frase: "cada linha é um(a) …";
-    - anote **volumetria e período**, que são o que dimensiona todo o resto do projeto;
-    - liste as **métricas aditivas** separadamente das dimensões — são elas que podem ser
-      somadas com segurança;
-    - deixe a seção de reprodução com os comandos reais, testados.
 
 ## Origem
 
-<span style="color:red">**Descreva o sistema de origem, a área responsável e em que formato
-os dados são publicados.**</span>
+<span style="color:red">**O dataset utilizado é o **AI4I 2020 Predictive Maintenance Dataset**, disponibilizado publicamente pelo UCI Machine Learning Repository (UCI ID 601) sob licença Creative Commons Attribution 4.0 International (CC BY 4.0). Ele reflete um cenário sintético, porém extremamente realista, de medições operacionais de uma planta industrial.**</span>
 
 ```
-CAMINHO_DA_ORIGEM  (caminho de rede, URI do bucket ou string de conexão)
+data/raw/ai4i2020.csv
 ```
 
-O caminho pode ser sobrescrito pela variável de ambiente `NOME_DA_VARIAVEL`.
-
-!!! warning "Dados sensíveis"
-    Não versione caminhos que contenham nome de usuário, token ou host interno
-    identificável. Prefira um placeholder aqui e o valor real em um `.env` fora do git.
 
 ### Extração vigente
 
-<span style="color:red">**Identifique a extração em uso (nome, data) e o que mudou em
-relação à anterior. Se colunas foram acrescentadas ou removidas, liste-as.**</span>
+A extração em uso compreende o arquivo integral `ai4i2020.csv` extraído em Outubro/2026 do repositório UCI. Trata-se da carga inicial do projeto, contendo todos os 10.000 registros e 14 colunas originais sem remoções ou alterações no arquivo bruto.
 
 | Coluna | Conteúdo |
 |:---|:---|
-| `nome_da_coluna` | &lt;o que ela representa&gt; |
-| `nome_da_coluna` | &lt;o que ela representa&gt; |
+| `UDI` | Identificador único do registro (variando de 1 a 10.000) |
+| `Product ID` | Código do produto combinando a letra da variante e o número de série |
+| `Type` | Variante de qualidade do produto (`L` = Low, `M` = Medium, `H` = High) |
+| `Air temperature [K]` | Temperatura do ar ambiente medida em Kelvin (K) |
+| `Process temperature [K]` | Temperatura do processo industrial medida em Kelvin (K) |
+| `Rotational speed [rpm]` | Velocidade de rotação do eixo da máquina em rotações por minuto (rpm) |
+| `Torque [Nm]` | Torque gerado pelo motor medido em Newton-metro (Nm) |
+| `Tool wear [min]` | Tempo acumulado de desgaste da ferramenta de corte em minutos |
+| `Machine failure` | Rótulo binário de falha geral do equipamento (0 = Não, 1 = Sim) |
+| `TWF` | Falha por Desgaste da Ferramenta (*Tool Wear Failure*) |
+| `HDF` | Falha por Dissipação de Calor / Sobreaquecimento (*Heat Dissipation Failure*) |
+| `PWF` | Falha por Potência de Operação (*Power Failure*) |
+| `OSF` | Falha por Sobrecarga de Tensão (*Overstrain Failure*) |
+| `RNF` | Falha Aleatória não enquadrada nos modos anteriores (*Random Failure*) |
 
 ## Organização da origem
 
-<span style="color:red">**Explique o esquema de particionamento ou a estrutura de
-diretórios/tabelas da origem.**</span>
+O conjunto de dados de origem é disponibilizado no repositório UCI sob a forma de um ficheiro CSV único e estruturado (*flat file*), sem particionamento de rede ou esquemas de pastas complexos. No projeto local, a estrutura de diretórios armazena os dados brutos na pasta `data/raw/` e os dados tratados em `data/processed/`.
 
-```
-raiz_da_origem/
-├── particao_1=valor/
-│   ├── particao_2=valor/arquivo.parquet
-│   └── ...
-└── particao_1=valor/
+```text
+data/
+├── raw/
+│   └── ai4i2020.csv
+└── processed/
+    └── ai4i2020_processed.parquet
 ```
 
 | Característica | Valor |
 |:---|---:|
-| Partições | &lt;n&gt; |
-| Arquivos | &lt;n&gt; |
-| Registros | &lt;n&gt; |
-| Colunas | &lt;n&gt; |
-| Volume na origem | &lt;n&gt; GB |
-| Período | &lt;aaaa a aaaa&gt; |
+| Partições | 1 |
+| Arquivos | 1 |
+| Registros | 10.000 |
+| Colunas | 14 |
+| Volume na origem | ~510 KB |
+| Período | Ciclos de máquina padronizados |
 
 ## Grão e conteúdo
 
-Cada linha é um(a) **&lt;grão do registro&gt;** (`coluna_identificadora`).
+Cada linha é um **ciclo operacional individual de usinagem da máquina** (`UDI`).
 
-<span style="color:red">**Descreva as dimensões disponíveis e, se a tabela for
-desnormalizada, quantas dimensões estão embutidas nela.**</span>
+A tabela encontra-se desnormalizada e agrupa variáveis de caracterização do produto (dimensão de qualidade `Type` e identificador `Product ID`), sensores contínuos de operação (temperaturas, rotação, torque e desgaste de ferramenta) e o registo histórico de falhas e seus respetivos modos.
 
 As métricas aditivas são:
 
 | Métrica | Descrição |
 |:---|:---|
-| `nome_da_metrica` | &lt;o que é contabilizado e em que unidade&gt; |
-| `nome_da_metrica` | &lt;o que é contabilizado e em que unidade&gt; |
+| `Air temperature [K]` | Medição da temperatura do ar ambiente medida em Kelvin (K) |
+| `Process temperature [K]` | Medição da temperatura do processo industrial medida em Kelvin (K) |
+| `Rotational speed [rpm]` | Velocidade de rotação do eixo da máquina medida em rotações por minuto (rpm) |
+| `Torque [Nm]` | Torque gerado pelo motor medido em Newton-metro (Nm) |
+| `Tool wear [min]` | Tempo acumulado de utilização da ferramenta de corte medido em minutos (min) |
 
 ## Fluxo de dados no projeto
 
 ```mermaid
 flowchart LR
-    A["Origem<br/>formato e volume"] --> B["data/raw<br/>o que é materializado"]
-    B --> C["data/processed/base curada<br/>colunas curadas"]
-    C --> D["data/processed/agregados<br/>um por objetivo"]
-    D --> E["notebooks<br/>figuras, tabelas e relatórios"]
+    A["Origem UCI<br/>ai4i2020.csv (510 KB)"] --> B["data/raw/ai4i2020.csv<br/>Base bruta imutável"]
+    B --> C["2.0-preparacao.ipynb<br/>Tratamento e Encoding"]
+    C --> D["data/processed/ai4i2020_processed.parquet<br/>Base curada e padronizada"]
+    D --> E["3.0-modelagem.ipynb & 4.0-avaliacao.ipynb<br/>Modelos, tabelas e gráficos"]
 ```
 
-<span style="color:red">**Indique o notebook e o módulo responsáveis pela carga, e se ela é
-idempotente (pode ser reexecutada sem duplicar dado).**</span>
 
 ## Fontes complementares
 
@@ -97,12 +88,18 @@ Dados que não vêm da origem principal, mas entram na análise.
 
 | Arquivo | Conteúdo |
 |:---|:---|
-| `data/raw/arquivo.csv` | &lt;o que contém e para que serve&gt; |
+| `Nenhum` | Todas as variáveis necessárias estão contidas no ficheiro único ai4i2020.csv |
 
 ## Reprodução
 
 ```bash
-# comandos que refazem a carga do zero
-uv run invoke ingestao
-uv run invoke preparacao
+# Sincronizar o ambiente e instalar dependências do projeto
+uv sync
+
+# Executar a pipeline de preparação dos dados
+uv run jupyter execute notebooks/2.0-preparacao.ipynb
+
+# Executar a modelagem e a avaliação dos clusters
+uv run jupyter execute notebooks/3.0-modelagem.ipynb
+uv run jupyter execute notebooks/4.0-avaliacao.ipynb
 ```
