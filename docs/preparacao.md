@@ -4,65 +4,60 @@ Esta página descreve **o que foi feito com os dados** entre a origem e a análi
 são materializados, que regras de limpeza foram aplicadas e como a transformação é
 conferida.
 
-!!! tip "Como preencher esta página"
-    Preencha em par com [Entendimento dos dados](entendimento-dados.md): lá ficam os achados
-    de qualidade, aqui ficam as decisões tomadas a respeito deles.
 
-    Regras práticas:
-
-    - separe os dados em **camadas** e trate a camada bruta como imutável — reprocessar deve
-      sempre partir dela, nunca de um arquivo editado à mão;
-    - toda regra de limpeza vem acompanhada do **motivo**; regra sem motivo é removida na
-      primeira refatoração e o problema volta;
-    - a carga precisa ser **idempotente**: reexecutar não pode duplicar dado nem exigir
-      recomeçar do zero;
-    - registre as **conferências** que provam que a transformação não perdeu nem inventou
-      dado — é o que permite confiar nos números depois;
-    - decisão sobre outlier é decisão de negócio, não de código: declare se o extremo é
-      legítimo e o que foi feito com ele.
 
 ## Arquitetura em camadas
 
 ```mermaid
 flowchart TD
-    A["Origem<br/>formato e volume"] -->|"módulo de ingestão"| B
-    B["data/raw<br/>cópia imutável"] -->|"módulo de preparação"| C
-    C["data/processed/base curada<br/>colunas selecionadas e limpas"] --> D
-    D["data/processed/agregados<br/>um por objetivo"]
+    A["Origem UCI<br/>ai4i2020.csv (510 KB)"] -->|"Cópia Direta"| B
+    B["data/raw<br/>ai4i2020.csv (Imutável)"] -->|"2.0-preparacao.ipynb"| C
+    C["data/processed<br/>ai4i2020_processed.parquet"] --> D
+    D["Notebooks de Modelagem<br/>3.0-modelagem.ipynb & 4.0-avaliacao.ipynb"]
 ```
 
 | Camada | Diretório | Papel |
 |:---|:---|:---|
-| Bruta | `data/raw` | cópia imutável da origem |
-| Curada | `data/processed/<base curada>` | colunas selecionadas, tipadas e limpas |
-| Agregada | `data/processed/<agregados>` | um agregado por objetivo de negócio |
+| Bruta | `data/raw` | Cópia imutável do arquivo bruto original da UCI (ai4i2020.csv). |
+| Curada | `data/processed/` | Base tratada, padronizada (StandardScaler) e codificada (OrdinalEncoder), salva em Parquet (ai4i2020_processed.parquet). |
+| Agregada / Modelagem | `data/processed/` | Subconjunto de características operacionais selecionadas sem rótulos de falha. |
 
 ## Materialização da camada bruta
 
-<span style="color:red">**Explique como a origem é copiada para `data/raw`: em que
-granularidade, em que formato e por quê.**</span>
+O arquivo original da UCI foi baixado e armazenado de forma imutável no repositório local:
 
 ```
 data/raw/nome_do_arquivo_particao=valor.parquet
 ```
 
+## Explicação:
+Granularidade (Grão): Cada registro (linha) representa um ciclo operacional individual de usinagem da máquina identificado pela coluna UDI. A granularidade fina no nível de ciclo operacional foi mantida para permitir a análise detalhada de variações térmicas e mecânicas instante a instante.
+
+Formato de Armazenamento: O arquivo foi mantido no formato CSV (Comma-Separated Values).
+
+Por que esta abordagem foi adotada?
+
+Garantia de Imutabilidade: A cópia bruta em data/raw/ funciona como a única fonte de verdade imutável do projeto. Nenhuma alteração, limpeza ou filtro é realizado diretamente sobre esse arquivo, garantindo que qualquer pipeline de tratamento possa ser reexecutada do zero sem o risco de contaminação ou perda irreversível de dados.
+
+Reprodutibilidade e Auditabilidade: Manter o arquivo bruto em formato texto estruturado (CSV) idêntico à fonte oficial do repositório UCI permite auditar o fluxo de ETL de ponta a ponta e garante a reprodutibilidade exata do ambiente em qualquer nova máquina.
+
 <span style="color:red">**Diga se a operação é idempotente e o que garante isso (manifesto,
 arquivo de controle, conferência de contagem contra a origem).**</span>
 
+A operação de leitura é completamente idempotente. Ao reexecutar o notebook 2.0-preparacao.ipynb, a base bruta em data/raw/ é lida de forma somente leitura, tratada em memória e exportada sobrescrevendo a camada processada.
+
 !!! note "Decisão técnica (opcional)"
-    Use um bloco como este para registrar uma escolha de implementação não óbvia —
-    ordenação, compressão, particionamento, uso de memória — e o motivo dela.
+    A camada curada foi salva em formato Apache Parquet (.parquet). O Parquet preserva a tipagem nativa de cada coluna do Pandas (ex.: float64, int64), comprime o tamanho em disco e acelera o tempo de leitura para as etapas de modelagem.
 
 ## Regras de limpeza
 
-<span style="color:red">**Indique onde as regras estão implementadas e se são aplicadas em
-uma única passada.**</span>
+As transformações foram executadas de forma concentrada no notebook notebooks/2.0-preparacao.ipynb:
 
 | # | Regra | Motivo |
 |:-:|:---|:---|
-| 1 | &lt;o que a regra faz&gt; | &lt;por que ela é necessária&gt; |
-| 2 | &lt;o que a regra faz&gt; | &lt;por que ela é necessária&gt; |
-| 3 | &lt;o que a regra faz&gt; | &lt;por que ela é necessária&gt; |
+| 1 | Remoção de Identificadores e Rótulos: Isolamento de UDI, Product ID e de todas as colunas de falha (Machine failure, TWF, HDF, PWF, OSF, RNF) no dataframe auxiliar df_labels. | Garantir o aprendizado não supervisionado estrito (regra PBL), evitando vazamento de dados (data leakage). |
+| 2 | Codificação Ordinal da Variável Type: Conversão da variante de qualidade (L, M, H) para valores discretos ordenados (0, 1, 2) via OrdinalEncoder. |Mapear a hierarquia de qualidade e tolerância do produto sem aumentar a dimensionalidade da base.; |
+| 3 | Padronização das Variáveis Contínuas: Aplicação do StandardScaler ($\mu=0, \sigma=1$) sobre as características térmicas, mecânicas e de desgaste. | Eliminar discrepâncias de escala entre diferentes unidades de medida ($K$, $rpm$, $Nm$, $min$), assegurando que nenhuma variável domine indevidamente as distâncias no K-Means e DBSCAN. |
 
 ??? note "Regras que costumam aparecer aqui"
     - seleção das colunas que sustentam os objetivos, para reduzir uma tabela larga a um
@@ -80,13 +75,13 @@ bruto.**</span>
 
 ## Conferências
 
-Validações executadas antes de seguir para a análise:
+Validações executadas antes de liberar a base para a modelagem:
 
-- **contagem de linhas** — &lt;o que é comparado com o quê&gt;;
-- **métricas** — &lt;quais somas precisam bater entre camadas&gt;;
-- **efeito da limpeza** — &lt;cardinalidade antes e depois nas dimensões afetadas&gt;;
-- **perfil de qualidade** — &lt;onde o relatório de nulos e cardinalidade é gravado&gt;;
-- **totais dos agregados** — &lt;cada agregado reproduz o total do seu recorte&gt;.
+- **contagem de linhas** — Confirmado que a base processada retém 100% das 10.000 linhas originais. Nenhuma linha foi descartada.
+- **métricas** — A soma dos rótulos de falha isolados no arquivo auxiliar (`df_labels`) bate exatamente com as 339 falhas totais registradas na base bruta original.
+- **efeito da limpeza** — A coluna categórica `Type` manteve suas 3 categorias distintas, sendo codificada com cardinalidade mantida (0 = Low, 1 = Medium, 2 = High).
+- **perfil de qualidade** — O diagnóstico de ausência de nulos e estatísticas descritivas das colunas padronizadas fica persistido nos logs de execução do notebook `2.0-preparacao.ipynb`.
+- **totais dos agregados** — A base curada final exportada em Parquet reproduz integralmente os 10.000 registros para consumo unificado dos modelos de clustering.
 
 ## Agregados
 
@@ -94,21 +89,21 @@ Um agregado por objetivo de negócio, no menor grão que aquele objetivo precisa
 
 | Agregado | Objetivo | Grão |
 |:---|:-:|:---|
-| `nome_do_agregado` | &lt;n&gt; | &lt;dimensões que compõem o grão&gt; |
-| `nome_do_agregado` | &lt;n&gt; | &lt;dimensões que compõem o grão&gt; |
+| `ai4i2020_processed.parquet` | 1 | Ciclo operacional da máquina (`UDI`) com variáveis padronizadas para agrupamento K-Means |
+| `ai4i2020_pca_dbscan.parquet` | 2 | Coordenadas reduzidas em 2D (PCA) e sinalização de ruído/anomalias (`Cluster -1`) |
+| `ai4i2020_crosstab_falhas.parquet` | 3 | Agrupamento por cluster e contagem cruzada com os rótulos reais de falha (`Machine failure`) |
 
 A coluna **Objetivo** referencia a numeração dos [critérios de sucesso](criterios-sucesso.md).
 
 ## Tratamento de outliers
 
-<span style="color:red">**Declare se os valores extremos são legítimos, se foram removidos
-ou mantidos, e o que é usado onde o extremo distorce a leitura (mediana, corte por quantil,
-escala logarítmica).**</span>
+Análise de Legitimidade: Os valores extremos detectados em velocidade de rotação (Rotational speed) e torque (Torque) foram mantidos na base. Eles representam regimes operacionais reais de alta solicitação da máquina e não erros de medição ou sujeira de digitação.
+
+Ação Adotada: Em vez de descartar os outliers, aplicou-se a padronização Z-score e, na etapa de modelagem, utilizou-se o DBSCAN justamente para agrupar e isolar esses pontos extremos como anomalias operacionais (Cluster -1).
 
 ## Reprodução
 
 ```bash
-# comandos que refazem cada camada
-uv run invoke ingestao      # data/raw
-uv run invoke preparacao    # data/processed
+# Executa o notebook responsável por ler data/raw e salvar data/processed
+uv run jupyter execute notebooks/2.0-preparacao.ipynb
 ```

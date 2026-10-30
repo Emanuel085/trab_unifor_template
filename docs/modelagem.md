@@ -1,105 +1,91 @@
 # Modelagem dos dados
 
-Esta página descreve **o desenho do experimento de modelagem**: qual problema o modelo
-resolve, sobre que unidade de análise ele opera, quais variáveis entram, qual técnica foi
-escolhida e como o resultado é avaliado.
+Esta página descreve **o desenho do experimento de modelagem**: qual problema o modelo resolve, sobre que unidade de análise ele opera, quais variáveis entram, qual técnica foi escolhida e como o resultado é avaliado.
 
-!!! tip "Como preencher esta página"
-    Nem todo objetivo exige modelo — objetivos descritivos são resolvidos na
-    [análise exploratória](analise-exploratoria.md). Declare logo no início **quais**
-    objetivos exigem modelagem e por quê.
-
-    Regras práticas:
-
-    - a **unidade de análise** vem da pergunta de negócio, não do formato da tabela; se a
-      pergunta é sobre o cliente, um registro por transação faria os clientes recorrentes
-      dominarem o resultado;
-    - amarre cada variável ao **critério de aceite** que a pediu, e marque as que você
-      acrescentou por conta própria;
-    - justifique a **técnica** pelo tipo de dado (categórico, contínuo, misto, textual,
-      temporal) — não pela familiaridade com a biblioteca;
-    - toda métrica de avaliação vem com a **direção de leitura** (maior é melhor / menor é
-      melhor) e com a ressalva de quando ela engana;
-    - liste as **saídas** com caminho: modelo serializado, tabelas de resultado e figuras.
+---
 
 ## Problema
 
-<span style="color:red">**Enuncie o problema em uma frase, no vocabulário do negócio, e
-indique a que objetivo dos [critérios de sucesso](criterios-sucesso.md) ele corresponde.**</span>
+Segmentar a frota de equipamentos industriais em regimes operacionais bem definidos e isolar anomalias de sensores, sem utilizar rótulos prévios de falha durante o aprendizado (atendendo aos **Objetivos 1 e 2** dos [critérios de sucesso](criterios-sucesso.md)).
 
-<span style="color:red">**Aponte o notebook e o módulo onde a modelagem está
-implementada.**</span>
+Toda a pipeline de modelagem está implementada no notebook **`notebooks/3.0-modelagem.ipynb`**.
+
+---
 
 ## Unidade de análise
 
-Um registro por **&lt;unidade de análise&gt;** (`arquivo_de_entrada`).
+Um registro por **ciclo operacional individual de usinagem** (`data/processed/ai4i2020_processed.parquet`).
 
-<span style="color:red">**Justifique a escolha: por que esta unidade e não outra, e o que
-daria errado com a alternativa.**</span>
+**Justificativa:** A modelagem opera no grão fino de ciclo de trabalho (`UDI`) para capturar oscilações momentâneas de temperatura, rotação e torque. Agrupar os dados previamente por máquina eliminaria a capacidade de identificar picos pontuais de sobrecarga e anomalias transientes isoladas pelo DBSCAN.
+
+---
 
 ## Variáveis
 
 | Critério pede | Variável usada | Observação |
 |:---|:---|:---|
-| &lt;dimensão pedida no critério&gt; | `nome_da_coluna` | &lt;o que ela representa&gt; |
-| &lt;dimensão pedida no critério&gt; | `nome_da_coluna` | &lt;o que ela representa&gt; |
-| — | `nome_da_coluna` | &lt;variável acrescentada e o que ela captura&gt; |
-
-<span style="color:red">**Descreva as variáveis derivadas, se houver, e o que elas separam
-que as variáveis originais não separavam.**</span>
+| Regime de Qualidade | `Type` | Codificado ordinalmente (0 = Low, 1 = Medium, 2 = High) |
+| Sensores Térmicos | `Air temperature [K]`, `Process temperature [K]` | Medições padronizadas de temperatura |
+| Sensores Mecânicos | `Rotational speed [rpm]`, `Torque [Nm]` | Medições padronizadas de desempenho dinâmico |
+| Desgaste do Componente | `Tool wear [min]` | Tempo acumulado de uso da ferramenta de corte |
 
 ### Pré-processamento
 
-<span style="color:red">**Registre cada transformação e o motivo.**</span>
+* **Isolamento de Rótulos (PBL):** Separação estrita das colunas de identificação e falha (`Machine failure`, `TWF`, `HDF`, etc.).
+* **Padronização (`StandardScaler`):** Média $\mu=0$ e desvio padrão $\sigma=1$ aplicados em todas as variáveis numéricas continuas para garantir peso uniforme no cálculo da distância euclidiana.
 
-??? note "Transformações que costumam entrar aqui"
-    - agrupamento de categorias raras em `Outros`, para que o modelo não gaste capacidade
-      descrevendo ruído;
-    - decisão sobre ausência: virar categoria própria, ser imputada ou excluir a linha;
-    - transformação de escala em contagens com cauda longa (`log1p`, padronização);
-    - codificação de categóricas, coerente com a técnica escolhida;
-    - balanceamento, quando a classe de interesse é rara.
+---
 
 ## Técnica
 
-<span style="color:red">**Explique por que esta técnica se aplica ao tipo de dado do
-problema.**</span>
+A abordagem não supervisionada combina **Análise de Componentes Principais (PCA)** para redução de dimensionalidade, **K-Means** para segmentação de regimes e **DBSCAN** para detecção de anomalias por densidade:
 
 ```mermaid
 flowchart LR
-    A["entrada<br/>variáveis"] --> B["etapa 1<br/>transformação"]
-    B --> C["etapa 2<br/>modelo"]
-    C --> D["etapa 3<br/>caracterização do resultado"]
+    A["Variáveis Padronizadas<br/>(6 D)"] --> B["PCA 2D<br/>Projeção de Variância"]
+    B --> C["K-Means (k=3)<br/>Regimes Operacionais"]
+    B --> D["DBSCAN<br/>Detecção de Anomalias (-1)"]
 ```
 
-<span style="color:red">**Detalhe cada etapa do pipeline e onde ela é ajustada — em amostra
-ou na base completa.**</span>
+<span style="color:red">**Detalhamento do Pipeline:
+Redução Dimensional (PCA):
+Redução do espaço de 6D para 2 componentes principais ($PC_1$ e $PC_2$), retendo 62,53% da variância explicada acumulada.
+Clusterização Particional (K-Means):
+Executada sobre a base completa para particionar as máquinas em $k=3$ agrupamentos operacionais.
+Clusterização por Densidade (DBSCAN): 
+Configurada com eps=1.2 e min_samples=15 para rotular pontos isolados de baixa densidade como anomalias (Cluster -1)..**</span>
 
 ## Avaliação do modelo
 
 | Métrica | Leitura |
 |:---|:---|
-| &lt;métrica&gt; | &lt;maior ou menor é melhor, e o que ela mede&gt; |
-| &lt;métrica&gt; | &lt;maior ou menor é melhor, e o que ela mede&gt; |
+| Método do Cotovelo (Inércia / WCSS) | Quanto menor, maior a compactação interna dos clusters. Apresentou ponto de inflexão (cotovelo) claro em $k=3$. |
+| Coeficiente de Silhueta (Silhouette Score) | Varia de -1 a +1; quanto maior, melhor a separação entre agrupamentos. Confirmou $k=3$ como a estrutura mais coesa. |
+| Porcentagem de Variância Explicada (PCA) | Quanto maior, melhor a representatividade dos dados originais. O espaço 2D retém 62,53% da informação total. |
 
-<span style="color:red">**Descreva o desenho do experimento: divisão treino/teste, validação
-cruzada, faixa de hiperparâmetros testada e critério de escolha do modelo final.**</span>
+<span style="color:red">**Como se trata de um problema de aprendizado não supervisionado, não há divisão tradicional em treino/teste ou validação cruzada supervisionada. O experimento avaliou a estabilidade da inércia e do silhouette score para variações de $k \in [2, 10]$ no K-Means e variação de eps no DBSCAN.**</span>
 
 !!! warning "Ressalva de métrica"
-    Use um bloco como este para registrar quando uma métrica engana no seu contexto — por
-    exemplo, acurácia com classes desbalanceadas, ou índices de separação em espaços
-    derivados de variáveis categóricas. Diga qual é o critério de desempate.
+O Silhouette Score calcula distâncias euclidianas globais e pode penalizar clusters com geometrias não esféricas ou densidades variadas. Por isso, a definição de $k=3$ combinou a métrica de silhueta com a interpretação física dos centróides no domínio industrial.
 
 ## Interpretação do resultado
 
-<span style="color:red">**Explique como o resultado é traduzido para o negócio: importância
-de variáveis, caracterização de grupos, regras extraídas. Se houver nomeação automática de
-grupos ou classes, descreva o critério.**</span>
+<span style="color:red">**A tradução dos clusters para a linguagem de negócio do chão de fábrica revelou 3 personas operacionais distintas:**</span>
+
+
+Cluster 0 (Regime Térmico / Sobreaquecimento): Máquinas operando com temperaturas elevadas de ar e processo. Representa o grupo de maior risco operacional.
+
+Cluster 1 (Regime de Carga Elevada / Alto Torque): Máquinas trabalhando com alto torque e menor rotação, sob forte solicitação mecânica.
+
+Cluster 2 (Regime Severo / Desgaste Acelerado): Equipamentos operando próximo ao limite de tempo de uso da ferramenta.
+
+Anomalias DBSCAN (Cluster -1): 110 ciclos operacionais identificados com comportamentos discrepantes nos limites do plano PCA.
 
 ## Saídas
 
 | Arquivo | Conteúdo |
 |:---|:---|
-| `data/processed/nome.parquet` | &lt;o que contém&gt; |
-| `models/nome.joblib` | &lt;modelo serializado, para que serve&gt; |
-| `reports/figures/nome/*.png` | &lt;quais figuras&gt; |
+| `data/processed/ai4i2020_processed.parquet` | Base limpa e padronizada enviada para a modelagem; |
+| `data/processed/ai4i2020_pca_dbscan.parquet` | Dataset com coordenadas PCA ($PC_1, PC_2$) e rótulos de cluster atribuídos |
+| `reports/figures/elbow_method.png` | Gráfico do Método do Cotovelo e Silhueta para K-Means |
+| `reports/figures/pca_clusters.png` | Gráfico de dispersão 2D dos clusters K-Means e outliers DBSCAN |
